@@ -1,0 +1,12 @@
+langchain
+langchain-classic
+langchain-ollama
+langchain-chroma
+langchain-community
+chromadb
+tiktoken
+firecrawl-py
+python-dotenv
+fastapi
+uvicorn
+sse-starlette

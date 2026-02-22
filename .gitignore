@@ -1,0 +1,6 @@
+.venv
+venv
+chroma_db
+__pycache__
+.env
+node_modules
