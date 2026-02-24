@@ -11,3 +11,4 @@ fastapi
 uvicorn
 sse-starlette
 pydantic-settings
+sentence-transformers

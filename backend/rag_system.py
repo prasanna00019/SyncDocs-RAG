@@ -63,9 +63,9 @@ class RAGSystem:
         )
 
         # mxbai-embed-large supports ~512 tokens; all-minilm only ~256
-        # Larger chunks = better context preservation for code documentation
-        chunk_size = 512
-        chunk_overlap = 50
+        # Note: chunk_size here is in characters, so 1000 chars is roughly 250 tokens.
+        chunk_size = 1000
+        chunk_overlap = 200
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
@@ -124,43 +124,40 @@ class RAGSystem:
             print(f"HyDE generation failed: {e}. Falling back to original query.")
             search_query = user_query
 
-        # 2. Base Retrieval (Fetch top 15 using HyDE query)
+        # 2. Base Retrieval (Fetch top 25 using HyDE query)
         retriever = self.vectorstore.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": 15}
+            search_kwargs={"k": 25}
         )
         
         initial_docs = retriever.invoke(search_query)
         print(f"Retrieved {len(initial_docs)} initial chunks via HyDE search.")
 
-        # 3. Embedding-based Re-ranking Phase
+        # 3. True Cross-Encoder Re-ranking Phase
         if len(initial_docs) > 5:
-            print("Re-ranking retrieved chunks against original query...")
+            print("Re-ranking retrieved chunks using Cross-Encoder...")
             try:
-                import math
-                query_emb = self.embeddings.embed_query(user_query)
-                doc_texts = [doc.page_content for doc in initial_docs]
-                doc_embs = self.embeddings.embed_documents(doc_texts)
-
-                def cosine_sim(v1, v2):
-                    dot = sum(x * y for x, y in zip(v1, v2))
-                    mag1 = math.sqrt(sum(x * x for x in v1))
-                    mag2 = math.sqrt(sum(y * y for y in v2))
-                    if mag1 == 0 or mag2 == 0: return 0
-                    return dot / (mag1 * mag2)
-
-                scored_docs = []
-                for idx, emb in enumerate(doc_embs):
-                    score = cosine_sim(query_emb, emb)
-                    scored_docs.append((score, initial_docs[idx]))
+                from sentence_transformers import CrossEncoder
+                # Initialize the cross-encoder model (downloads once and caches locally)
+                encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
                 
-                # Sort by score descending and take top 5
+                # Format pairs for predicting: [(query, doc1), (query, doc2), ...]
+                # We use the raw user_query to evaluate relevance, not the HyDE query.
+                pairs = [(user_query, doc.page_content) for doc in initial_docs]
+                
+                # Predict scores
+                scores = encoder.predict(pairs)
+                
+                # Zip documents with their predicted scores
+                scored_docs = list(zip(scores, initial_docs))
+                
+                # Sort by score descending and take top 10
                 scored_docs.sort(key=lambda x: x[0], reverse=True)
-                final_docs = [doc for score, doc in scored_docs[:5]]
-                print("Re-ranking complete. Selected top 5 most relevant chunks.")
+                final_docs = [doc for score, doc in scored_docs[:10]]
+                print("Cross-Encoder Re-ranking complete. Selected top 10 most relevant chunks.")
             except Exception as e:
-                print(f"Re-ranking failed: {e}. Using top 5 from base retrieval.")
-                final_docs = initial_docs[:5]
+                print(f"Cross-Encoder re-ranking failed: {e}. Using top 10 from base retrieval.")
+                final_docs = initial_docs[:10]
         else:
             final_docs = initial_docs
 
