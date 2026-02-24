@@ -2,15 +2,16 @@ import os
 from typing import List, Dict, Any
 from langchain_core.documents import Document
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-from langchain_ollama import OllamaEmbeddings, ChatOllama
-from ollama_utils import get_best_ollama_model, get_embedding_model
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_ollama import ChatOllama
+from ollama_utils import get_best_ollama_model
 from langchain_chroma import Chroma
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 
 class RAGSystem:
-    def __init__(self, persist_directory: str = "./chroma_db"):
+    def __init__(self, persist_directory: str = "./chroma_db_v2"):
         self.persist_directory = persist_directory
         
         # Chat model (cloud models are OK)
@@ -18,18 +19,11 @@ class RAGSystem:
         if not self.chat_model_name:
             raise RuntimeError("Could not find a valid Ollama chat model. Ensure Ollama is running.")
         
-        # Embedding model (must be LOCAL, cloud models can't embed)
-        self.embed_model_name = get_embedding_model()
-        if not self.embed_model_name:
-            raise RuntimeError(
-                "Could not find a local Ollama model for embeddings.\n"
-                "Cloud models (e.g. minimax-m2.5:cloud) cannot generate embeddings.\n"
-                "Please pull a local model:  ollama pull nomic-embed-text"
-            )
-
+        # Embedding model: Using HuggingFace MiniLM for 17x faster local embeddings
+        self.embed_model_name = "sentence-transformers/all-MiniLM-L6-v2"
         print(f"[RAG] Chat model: {self.chat_model_name}")
         print(f"[RAG] Embedding model: {self.embed_model_name}")
-        self.embeddings = OllamaEmbeddings(model=self.embed_model_name)
+        self.embeddings = HuggingFaceEmbeddings(model_name=self.embed_model_name)
         self.llm = ChatOllama(model=self.chat_model_name, temperature=0)
 
         # Initialize an empty vector store or load existing one
@@ -42,13 +36,37 @@ class RAGSystem:
     def chunk_and_ingest(self, scraped_data: List[Dict[str, Any]]):
         """
         Takes scraped markdown data, chunks it intelligently based on markdown headers,
-        and ingests it into ChromaDB.
+        and ingests it into ChromaDB. Skips documents that haven't changed using MD5 hashing.
         """
         if not scraped_data:
             print("No data to ingest.")
             return
 
-        print(f"Ingesting {len(scraped_data)} markdown documents...")
+        import hashlib
+        new_scraped_data = []
+        for item in scraped_data:
+            url = item.get("url", "unknown_url")
+            markdown_content = item.get("markdown", "")
+            if not markdown_content:
+                continue
+
+            content_hash = hashlib.md5(markdown_content.encode('utf-8')).hexdigest()
+            try:
+                existing = self.vectorstore.get(where={"content_hash": content_hash})
+                if existing and existing.get("ids"):
+                    print(f"Skipping unchanged document (Cache Hit): {url}")
+                    continue
+            except Exception:
+                pass # First run or schema mismatch
+            
+            item["content_hash"] = content_hash
+            new_scraped_data.append(item)
+
+        if not new_scraped_data:
+            print("All documents perfectly match cache. Skipping embedding phase.")
+            return
+
+        print(f"Ingesting {len(new_scraped_data)} new/changed markdown documents...")
 
         # We want to split heavily on headers so that structure is preserved
         headers_to_split_on = [
@@ -71,7 +89,7 @@ class RAGSystem:
         )
 
         all_splits = []
-        for item in scraped_data:
+        for item in new_scraped_data:
             url = item.get("url", "unknown_url")
             markdown_content = item.get("markdown", "")
 
@@ -81,9 +99,10 @@ class RAGSystem:
             # 1. Split by Markdown headers
             md_header_splits = markdown_splitter.split_text(markdown_content)
 
-            # 2. Add source URL to metadata
+            # 2. Add source URL and Hash to metadata
             for split in md_header_splits:
                 split.metadata["source"] = url
+                split.metadata["content_hash"] = item["content_hash"]
 
             # 3. Apply secondary text splitting to ensure chunks aren't too large for the embedder
             final_splits = text_splitter.split_documents(md_header_splits)

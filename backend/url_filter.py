@@ -1,17 +1,13 @@
 import os
 from typing import List, Dict, Any
 import math
-from langchain_ollama import OllamaEmbeddings
-from ollama_utils import get_embedding_model
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 class URLFilter:
     def __init__(self):
-        # We use a local Ollama model for embeddings now
-        self.model_name = get_embedding_model()
-        if not self.model_name:
-            raise RuntimeError("Could not find a valid Ollama embedding model. Ensure Ollama is running.")
-
-        self.embeddings = OllamaEmbeddings(model=self.model_name)
+        # We use a lightning fast local HuggingFace model for embeddings instead of Ollama
+        self.model_name = "sentence-transformers/all-MiniLM-L6-v2"
+        self.embeddings = HuggingFaceEmbeddings(model_name=self.model_name)
 
     def filter_urls(self, query: str, mapped_urls: List[Dict[str, Any]], max_urls_to_send: int = 150) -> List[str]:
         """

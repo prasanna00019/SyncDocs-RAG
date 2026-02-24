@@ -87,7 +87,7 @@ async def rag_pipeline(request: Request):
                 yield _event("map", "running", {"url": url})
                 await asyncio.sleep(0)
 
-                mapped_urls = crawler.map_documentation(url)
+                mapped_urls = await asyncio.to_thread(crawler.map_documentation, url)
 
                 yield _event("map", "done", {
                     "total_links": len(mapped_urls),
@@ -102,7 +102,7 @@ async def rag_pipeline(request: Request):
                 })
                 await asyncio.sleep(0)
 
-                filtered = url_filter.filter_urls(query, mapped_urls)
+                filtered = await asyncio.to_thread(url_filter.filter_urls, query, mapped_urls)
                 urls_to_scrape = filtered[:limit]
 
                 yield _event("filter", "done", {
@@ -119,7 +119,7 @@ async def rag_pipeline(request: Request):
                 yield _event("scrape", "running", {"urls": urls_to_scrape})
                 await asyncio.sleep(0)
 
-                scraped_data = crawler.scrape_urls(urls_to_scrape)
+                scraped_data = await asyncio.to_thread(crawler.scrape_urls, urls_to_scrape)
 
                 yield _event("scrape", "done", {
                     "scraped_count": len(scraped_data),
@@ -135,7 +135,7 @@ async def rag_pipeline(request: Request):
                 yield _event("ingest", "running", {"doc_count": len(scraped_data)})
                 await asyncio.sleep(0)
 
-                rag.chunk_and_ingest(scraped_data)
+                await asyncio.to_thread(rag.chunk_and_ingest, scraped_data)
 
                 yield _event("ingest", "done", {"message": "Chunks ingested into ChromaDB"})
                 await asyncio.sleep(0)
@@ -144,7 +144,7 @@ async def rag_pipeline(request: Request):
             yield _event("generate", "running", {"query": query})
             await asyncio.sleep(0)
 
-            answer = rag.query(query)
+            answer = await asyncio.to_thread(rag.query, query)
 
             yield _event("generate", "done", {"answer": answer})
             yield _event("complete", "done", {"message": "Pipeline complete"})
