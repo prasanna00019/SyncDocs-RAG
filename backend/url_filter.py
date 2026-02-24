@@ -1,72 +1,81 @@
 import os
-from typing import List
-from langchain_ollama import ChatOllama
-from ollama_utils import get_best_ollama_model
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import CommaSeparatedListOutputParser
+from typing import List, Dict, Any
+import math
+from langchain_ollama import OllamaEmbeddings
+from ollama_utils import get_embedding_model
 
 class URLFilter:
     def __init__(self):
-        # We use a local Ollama model for this filtering task
-        self.model_name = get_best_ollama_model()
+        # We use a local Ollama model for embeddings now
+        self.model_name = get_embedding_model()
         if not self.model_name:
-            raise RuntimeError("Could not find a valid Ollama model. Ensure Ollama is running.")
+            raise RuntimeError("Could not find a valid Ollama embedding model. Ensure Ollama is running.")
 
-        self.llm = ChatOllama(model=self.model_name, temperature=0)
-        self.output_parser = CommaSeparatedListOutputParser()
+        self.embeddings = OllamaEmbeddings(model=self.model_name)
 
-        # Prompt to instruct the LLM to pick out the most relevant URLs
-        self.prompt = PromptTemplate(
-            template="""You are an intelligent documentation assistant. 
-Your goal is to look at a list of documentation URLs and select ONLY the URLs that are most likely to contain the answer to the user's query.
-Select at most 5 URLs. Return them as a comma-separated list.
-If none of the URLs seem relevant, return an empty string.
-
-User Query: {query}
-
-Available URLs:
-{urls}
-
-Response (Comma-separated URLs only):""",
-            input_variables=["query", "urls"]
-        )
-
-        self.chain = self.prompt | self.llm | self.output_parser
-
-    def filter_urls(self, query: str, mapped_urls: List[str], max_urls_to_send: int = 150) -> List[str]:
+    def filter_urls(self, query: str, mapped_urls: List[Dict[str, Any]], max_urls_to_send: int = 150) -> List[str]:
         """
-        Takes a huge list of mapped URLs and uses an LLM to select the most relevant ones.
-        Limits the number of URLs sent in the prompt to avoid blowing up the context window.
+        Filters URLs semantically by comparing query embeddings to URL metadata embeddings.
+        Leaves out URLs that don't have a title or description.
         """
         if not mapped_urls:
             return []
 
         print(f"Filtering {len(mapped_urls)} URLs for query: '{query}'")
 
-        # Truncate if there are way too many URLs
-        urls_subset = mapped_urls[:max_urls_to_send]
-        urls_string = "\n".join(urls_subset)
+        valid_links = []
+        for link in mapped_urls:
+            url = link.get("url")
+            title = link.get("title")
+            desc = link.get("description")
+            # User specified: ignore URLs without title or description
+            if url and (title or desc):
+                valid_links.append({"url": url, "title": title, "description": desc})
+
+        if not valid_links:
+            print("No URLs with title/description found to filter.")
+            return []
 
         try:
-            # Run the LLM chain
-            selected_urls = self.chain.invoke({
-                "query": query,
-                "urls": urls_string
-            })
+            # Generate embedding for the query
+            query_embedding = self.embeddings.embed_query(query)
 
-            # Clean up the URLs (LLMs sometimes add quotes or spaces)
-            cleaned_urls = [url.strip().strip("'\"") for url in selected_urls if url.strip()]
+            # Construct representation string for each valid link
+            texts = []
+            for link in valid_links:
+                rep = []
+                if link.get("title"):
+                    rep.append(f"Title: {link['title']}")
+                if link.get("description"):
+                    rep.append(f"Description: {link['description']}")
+                texts.append(" | ".join(rep))
 
-            # Ensure the selected URLs were actually in our original list to prevent hallucinations
-            valid_urls = [url for url in cleaned_urls if url in mapped_urls]
+            # Generate embeddings for the documents
+            link_embeddings = self.embeddings.embed_documents(texts)
 
-            print(f"LLM selected {len(valid_urls)} relevant URLs.")
-            return valid_urls
+            def cosine_similarity(v1, v2):
+                dot_product = sum(x * y for x, y in zip(v1, v2))
+                mag1 = math.sqrt(sum(x * x for x in v1))
+                mag2 = math.sqrt(sum(y * y for y in v2))
+                if mag1 == 0 or mag2 == 0:
+                    return 0
+                return dot_product / (mag1 * mag2)
+
+            scored_links = []
+            for i, doc_emb in enumerate(link_embeddings):
+                score = cosine_similarity(query_embedding, doc_emb)
+                scored_links.append((score, valid_links[i]["url"]))
+
+            scored_links.sort(key=lambda x: x[0], reverse=True)
+            
+            selected_urls = [url for score, url in scored_links]
+            print(f"Semantically sorted {len(selected_urls)} relevant URLs.")
+            return selected_urls
 
         except Exception as e:
-            print(f"Error during URL filtering: {e}")
-            # Fallback: Just return the first few URLs if LLM fails
-            return mapped_urls[:3]
+            print(f"Error during semantic URL filtering: {e}")
+            # Fallback
+            return [link["url"] for link in valid_links]
 
 if __name__ == "__main__":
     pass

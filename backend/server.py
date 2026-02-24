@@ -55,6 +55,17 @@ async def rag_pipeline(request: Request):
     limit = body.get("limit", 5)
 
     async def stream() -> AsyncGenerator[str, None]:
+        # ── Security: Input Sanitization ────────────────────────
+        if len(query) > 1000:
+            yield _event("error", "done", {"message": "Query length exceeds security limit."})
+            return
+            
+        blacklist = ["ignore all previous", "discard instructions", "system prompt", "jailbreak", "bypass"]
+        query_lower = query.lower()
+        if any(term in query_lower for term in blacklist):
+            yield _event("error", "done", {"message": "Security Alert: Query contains prohibited phrases."})
+            return
+
         try:
             # ── Step 0: Initialize ──────────────────────────────────
             yield _event("init", "running", {"message": "Initializing RAG pipeline..."})

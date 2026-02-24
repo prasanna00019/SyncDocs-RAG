@@ -7,18 +7,29 @@ class DocsCrawler:
         # Firecrawl automatically looks for FIRECRAWL_API_KEY in the environment
         self.app = Firecrawl()
 
-    def map_documentation(self, url: str) -> List[str]:
+    def map_documentation(self, url: str) -> List[Dict[str, Any]]:
         """
         Takes a base URL and uses Firecrawl's v2 /map endpoint to find all related sub-links.
-        Returns a list of URL strings.
+        Returns a list of dicts containing url and potentially metadata like title or description.
         """
         print(f"Mapping sub-links for: {url}...")
         try:
             # v2 API: app.map(url) returns a MapData object with .links
             map_result = self.app.map(url)
 
-            # map_result.links is a list of LinkResult objects, each with a .url attribute
-            links = [link.url for link in map_result.links]
+            # Extract raw links which could be objects or dicts
+            links_raw = map_result.links if hasattr(map_result, "links") else map_result.get("links", [])
+            
+            links = []
+            for link in links_raw:
+                if isinstance(link, dict):
+                    links.append(link)
+                else:
+                    links.append({
+                        "url": getattr(link, "url", str(link)),
+                        "title": getattr(link, "title", None),
+                        "description": getattr(link, "description", None)
+                    })
 
             print(f"Found {len(links)} links mapped from {url}")
             return links

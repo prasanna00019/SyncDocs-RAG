@@ -7,7 +7,7 @@ CLOUD_MODELS = {"minimax-m2.5:cloud", "kimi-k2.5:cloud", "glm-5:cloud"}
 PREFERRED_CHAT_MODELS = ["minimax-m2.5:cloud", "kimi-k2.5:cloud", "glm-5:cloud", "gemma3:4b"]
 
 # Preferred models for embeddings (must be LOCAL models with actual weights)
-PREFERRED_EMBEDDING_MODELS = ["mxbai-embed-large", "nomic-embed-text", "all-minilm"]
+PREFERRED_EMBEDDING_MODELS = ["embeddinggemma:300m","mxbai-embed-large:latest", "nomic-embed-text", "all-minilm"]
 
 
 def _get_available_models():
