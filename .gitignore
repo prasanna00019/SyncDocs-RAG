@@ -4,3 +4,6 @@ chroma_db
 __pycache__
 .env
 node_modules
+.syncdocs
+*.egg-info
+.pytest_cache

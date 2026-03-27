@@ -1,73 +1,150 @@
-# SyncDocs RAG 🚀
+# SyncDocs MCP
 
-![SyncDocs RAG Hero](https://raw.githubusercontent.com/prasanna00019/SyncDocs-RAG/main/logo.png)
+SyncDocs MCP is a local-first documentation RAG stack that now lives as a root Python package, with:
 
-**SyncDocs RAG** is a "just-in-time" Retrieval-Augmented Generation (RAG) system designed to solve one of the biggest bottlenecks in AI development: **outdated knowledge.**
+- an MCP server for Claude Desktop, Cursor, and other MCP clients
+- a shared service layer for indexing and querying docs
+- a compatibility FastAPI backend so the existing frontend still works
+- Docker assets for a self-hosted Firecrawl + SearXNG stack
 
-## 🧠 The Problem: The "Knowledge Cutoff"
+## Current Architecture
 
-Standard LLMs (like GPT-4 or local models) suffer from a **knowledge cutoff.** If a software library was updated last week, the LLM won't know about the new API changes or deprecated methods. Relying on outdated data leads to:
+The project is no longer centered on the old standalone `backend/` app. The main runtime now lives in:
 
-- **Hallucinations**: The AI suggests non-existent parameters or methods.
-- **Wasted Time**: Developers spend hours debugging code that the "AI thought was right."
-- **Stale Context**: Static documentation datasets are obsolete almost as soon as they are compiled.
-
-## ⚡ The Solution: SyncDocs RAG
-
-SyncDocs RAG eliminates the cutoff by bridging the gap between your LLM and the live web. It uses **Firecrawl** to "Sync" the latest documentation directly into the AI's reasoning loop.
-
-- **Eliminate Halucinations**: Answers are grounded in the *exact* documentation you point it at.
-- **Just-In-Time Intelligence**: If the docs update, your AI updates. Instantly.
-- **Precision Retrieval**: Uses semantic Markdown splitting to ensure the AI understands the *structure* of the documentation, not just the words.
-
----
-
-## ✨ Key Features
-
-- **Just-In-Time Ingestion**: Scrape any documentation site in real-time using **Firecrawl**.
-- **Full-Stack UI**: Modern React + Tailwind frontend with real-time pipeline status and terminal-style logs.
-- **Semantic Link Filtering**: Embeds the query and available URLs to mathematically select the most relevant pages, eliminating LLM hallucination and saving context space.
-- **Advanced RAG (HyDE & Cross-Encoder)**: Generates hypothetical answers to massively improve retrieval accuracy, followed by `sentence-transformers` Cross-Encoder re-ranking to surface the definitive top chunks.
-- **Enterprise Security**: Built-in input sanitization, heuristic blacklist checking, and system prompt XML delimiters to prevent jailbreaks and prompt injections.
-- **High-Performance Non-Blocking Backend**: True concurrent async API execution paired with **MD5 Content Hashing** to instantly skip re-scraping and embedding unchanged documentation pages.
-- **Local-First AI**: Optimized for local execution with **Ollama** (supports cloud fallback for chat).
-
-## 🏗️ Architecture
-
-- **Backend**: FastAPI server with strictly unblocked asynchronous pipeline execution and SSE logging.
-- **Frontend**: Vite + React 19 + Tailwind CSS v3 with a sleek dark theme.
-- **Vector DB**: ChromaDB for local embedding storage.
-- **AI Stack**: LangChain Core/Community/Ollama for orchestration and HuggingFace for fast local embeddings.
-- **Re-Ranking**: `sentence-transformers` (Cross-Encoder) for state-of-the-art chunk scoring.
-
-## 🚀 Getting Started
-
-### 1. Prerequisites
-
-- [Ollama](https://ollama.com/) installed and running.
-- [Firecrawl API Key](https://firecrawl.dev/).
-- Python 3.10+ and Node.js.
-
-### 2. Environment Setup
-
-Create a `.env` file in the `backend/` directory:
-
-```env
-FIRECRAWL_API_KEY="fc-..."
-OPENAI_API_KEY="sk-..."  # Optional, defaults to Ollama
+```text
+syncdocs_mcp/
+  cli.py
+  config.py
+  server.py
+  service.py
+  firecrawl/
+  rag/
+docker/
+backend/
+frontend/
+tests/
 ```
 
-### 3. Run the Backend
+Key changes in this migration:
+
+- Firecrawl mapping now uses `/map?search=` instead of local URL embedding filtering
+- scraping now uses `batch_scrape` plus `changeTracking`
+- retrieval now uses parent/child chunking, BM25 + vector hybrid search, HyDE, and reranking
+- runtime state moved to `~/.syncdocs/`
+- `backend/` now acts as a compatibility wrapper over the new package
+
+## Install
+
+```bash
+uv venv
+uv pip install -e .
+```
+
+## Local Setup
+
+Run:
+
+```bash
+syncdocs setup
+```
+
+That will:
+
+- create `~/.syncdocs/config.json`
+- copy the bundled Docker assets into `~/.syncdocs/docker`
+- optionally start the local Docker stack
+- store the chosen Ollama chat model in config
+- start an upstream-aligned Firecrawl self-host stack with:
+  - `firecrawl`
+  - `playwright-service`
+  - `nuq-postgres`
+  - `rabbitmq`
+  - `redis`
+  - `searxng`
+
+Runtime state lives in:
+
+- `~/.syncdocs/config.json`
+- `~/.syncdocs/chroma_db/`
+- `~/.syncdocs/bm25/`
+- `~/.syncdocs/docker/`
+
+## MCP Server
+
+Start the MCP server with:
+
+```bash
+python -m syncdocs_mcp
+```
+
+Exposed MCP tools:
+
+- `search_web(query, limit=5)`
+- `fetch_and_index(url, library, query, version="latest")`
+- `query_docs(query, library, version="latest")`
+
+### MCP Client Config
+
+Example config for Claude Desktop or Cursor:
+
+```json
+{
+  "mcpServers": {
+    "syncdocs": {
+      "command": "python",
+      "args": ["-m", "syncdocs_mcp"],
+      "cwd": "C:/path/to/SyncDocs-RAG"
+    }
+  }
+}
+```
+
+## Recommended Testing Path
+
+Test the MCP server in this order:
+
+1. MCP Inspector first, because it gives you direct visibility into the tool list, raw inputs, and raw outputs.
+2. Claude Desktop or Cursor second, as a final integration check with a real agent client.
+
+The full setup and step-by-step test flow is documented in [TESTING_SUITE.md](./TESTING_SUITE.md).
+
+For a quick manual reachability check after startup:
+
+```bash
+curl http://localhost:3002
+curl http://localhost:8080
+```
+
+Expected:
+
+- Firecrawl returns a small JSON response like `{"message":"Firecrawl API", ...}`
+- SearXNG returns HTML on `/` and JSON on `/search?...&format=json`
+
+## CLI
+
+Available commands:
+
+```bash
+syncdocs setup
+syncdocs status
+syncdocs list
+syncdocs clear stripe latest
+syncdocs refresh stripe latest
+```
+
+## Demo Compatibility Mode
+
+The existing frontend is still supported.
+
+### Backend
 
 ```bash
 cd backend
-uv venv
-# Activate venv then:
 uv pip install -r requirements.txt
 python server.py
 ```
 
-### 4. Run the Frontend
+### Frontend
 
 ```bash
 cd frontend
@@ -75,13 +152,18 @@ npm install
 npm run dev
 ```
 
-## 🛠️ Configuration
+The compatibility backend keeps:
 
-**SyncDocs RAG** automatically selects the best available models from your local Ollama:
+- `GET /api/health`
+- `POST /api/rag`
 
-- **Chat**: Prefers `minimax-m2.5:cloud` or `gemma3:4b`.
-- **Embeddings**: `sentence-transformers/all-MiniLM-L6-v2` (CPU-optimized, blazing fast local embeddings).
+When a URL is provided in the demo, SyncDocs infers a library name from the domain, indexes it as `latest`, and stores it as the active collection for follow-up queries.
 
-## 📄 License
+## Verification
 
-MIT
+Current repo-level verification:
+
+```bash
+python -m compileall syncdocs_mcp backend tests
+python -m unittest discover -s tests
+```

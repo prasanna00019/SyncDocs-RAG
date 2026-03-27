@@ -1,0 +1,21 @@
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+engines:
+  - name: google
+    engine: google
+    weight: 2
+  - name: duckduckgo
+    engine: duckduckgo
+    weight: 1
+  - name: bing
+    engine: bing
+    weight: 1
+
+server:
+  secret_key: syncdocs_local_dev_secret_change_me
+  limiter: false

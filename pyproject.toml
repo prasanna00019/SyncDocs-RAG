@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "syncdocs-mcp"
+version = "0.1.0"
+description = "Self-hosted MCP server and compatibility demo wrapper for live documentation RAG."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  { name = "SyncDocs Contributors" }
+]
+dependencies = [
+  "chromadb",
+  "click",
+  "fastapi",
+  "firecrawl-py",
+  "langchain-chroma",
+  "langchain-classic",
+  "langchain-community",
+  "langchain-core",
+  "langchain-ollama",
+  "langchain-text-splitters",
+  "mcp",
+  "python-dotenv",
+  "rank-bm25",
+  "requests",
+  "rich",
+  "sentence-transformers",
+  "sse-starlette",
+  "uvicorn",
+]
+
+[project.scripts]
+syncdocs = "syncdocs_mcp.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["syncdocs_mcp"]
